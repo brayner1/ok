@@ -61,6 +61,9 @@ bool thread_mlfqs;
 
 static void kernel_thread (thread_func *, void *aux);
 
+static bool thread_max_func(struct list_elem *a, struct list_elem *b, void *aux);
+static int Ready_max_priority (void);
+
 static void idle (void *aux UNUSED);
 static struct thread *running_thread (void);
 static struct thread *next_thread_to_run (void);
@@ -298,6 +301,12 @@ thread_exit (void)
 
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
+
+/* Para o escalonador de prioridades, se a prioridade da thread atual for maior do que
+   a thread com maior prioridade na lista Ready, então nem escalona. Se não, troca 
+   o status da thread pra Ready, coloca ela na lista Ready, e escalona uma nova 
+   thread com maior prioridade */
+
 void
 thread_yield (void) 
 {
@@ -305,13 +314,17 @@ thread_yield (void)
   enum intr_level old_level;
   
   ASSERT (!intr_context ());
-
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
-  cur->status = THREAD_READY;
-  schedule ();
+  if (cur->priority <= Ready_max_priority() ) {
+    
+    if (cur != idle_thread) 
+      list_push_back (&ready_list, &cur->elem);
+    
+    cur->status = THREAD_READY;
+    schedule (); 
+  }
   intr_set_level (old_level);
+  
 }
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
@@ -336,6 +349,8 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  if (new_priority < Ready_max_priority() )
+    thread_yield();
 }
 
 /* Returns the current thread's priority. */
@@ -343,6 +358,12 @@ int
 thread_get_priority (void) 
 {
   return thread_current ()->priority;
+}
+
+/* Retorna a thread com maior prioridade na lista de Ready */
+static int
+Ready_max_priority (void) {
+  return list_entry(list_max(&ready_list, thread_max_func, NULL) , struct thread, elem)->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -489,9 +510,7 @@ static bool
 thread_max_func(struct list_elem *a, struct list_elem *b, void *aux) {
 
   return list_entry(a,struct thread,elem)->priority >
-
          list_entry(b,struct thread,elem)->priority;
-
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
