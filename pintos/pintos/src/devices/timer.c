@@ -33,6 +33,7 @@ static void real_time_delay (int64_t num, int32_t denom);
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 static struct list WaitingT;
+
 void
 timer_init (void) 
 {
@@ -110,6 +111,7 @@ timer_sleep (int64_t ticks)
   SP.ticks = ticks;
   SP.start = start;
   list_push_back(&WaitingT, &SP.elem);
+  if (thread_mlfqs) thread_current()->priority = PRI_DEFAULT;
   sema_down(&SP.sem);
   
 }
@@ -199,6 +201,8 @@ timer_print_stats (void)
 {
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
+
+
 
 /* Timer interrupt handler. */
 static void

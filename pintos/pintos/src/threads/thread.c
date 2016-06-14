@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -23,6 +24,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+static int ready_cnt = 0; // Quantidade de threads prontas
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -58,6 +60,12 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
+
+/* Valor f para aritmética Fixed-Point */
+static int f = 16384;
+
+/* Variável load_avg com a média de threads prontas no último segundo */
+static int load_avg = 0; 
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -135,6 +143,11 @@ thread_tick (void)
   else
     kernel_ticks++;
 
+
+  /* Atualiza load_avg se tiver passado 1 segundo */ 
+  if (timer_ticks() % TIMER_FREQ == 0)
+    load_avg =(((16111 + (f/2))/f)*((int64_t) load_avg)) + (273)*ready_cnt;
+
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
@@ -179,7 +192,7 @@ thread_create (const char *name, int priority,
   t = palloc_get_page (PAL_ZERO);
   if (t == NULL)
     return TID_ERROR;
-
+  if (thread_mlfqs) priority = PRI_MAX;
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
@@ -217,7 +230,9 @@ thread_block (void)
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
 
+  if (thread_current() != idle_thread) ready_cnt--;
   thread_current ()->status = THREAD_BLOCKED;
+  
   schedule ();
 }
 
@@ -233,14 +248,25 @@ void
 thread_unblock (struct thread *t) 
 {
   enum intr_level old_level;
+  struct thread *cur = thread_current();
 
   ASSERT (is_thread (t));
-
+  bool ok = cur != idle_thread;
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
+  //if (ok && thread_mlfqs) t->priority = PRI_MAX;
   list_insert_ordered(&ready_list, &t->elem,thread_max_func, NULL);
+  ready_cnt++;
   t->status = THREAD_READY;
+  printf("desbloqueando thread %d, ready = %d \n", t->tid, ready_cnt);
   intr_set_level (old_level);
+  if(ok)
+  {
+    if(t->priority > thread_get_priority())
+    {
+      thread_yield();
+    }
+  }
 }
 
 /* Returns the name of the running thread. */
@@ -308,8 +334,11 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
+  if (thread_mlfqs)
+    cur->priority = PRI_DEFAULT;
+  if (cur != idle_thread) {
     list_insert_ordered(&ready_list, &cur->elem, thread_max_func, NULL);
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -336,6 +365,8 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  if (thread_mlfqs)
+    return;
   thread_current ()->priority = new_priority;
   if (new_priority < list_entry(list_begin(&ready_list), struct thread, elem)->priority)
     thread_yield();
@@ -368,7 +399,10 @@ int
 thread_get_load_avg (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  int aux =  ((load_avg) + (f/2))/f;
+  printf("load avg: %d, aux: %d\n", load_avg, aux );
+  //return load_avg;
+  return aux*100;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -377,6 +411,11 @@ thread_get_recent_cpu (void)
 {
   /* Not yet implemented. */
   return 0;
+}
+
+int
+get_readycnt (void) {
+  return ready_cnt;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -496,9 +535,8 @@ next_thread_to_run (void)
 
   if (list_empty (&ready_list))
     return idle_thread;
-  else {
+  else 
     return list_entry (list_pop_front (&ready_list), struct thread, elem);
-  }
 }
 
 /* Completes a thread switch by activating the new thread's page
