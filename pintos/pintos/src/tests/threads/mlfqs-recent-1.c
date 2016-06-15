@@ -103,10 +103,50 @@
 #include "threads/thread.h"
 #include "devices/timer.h"
 
+void Priority_test (void);
 /* Sensitive to assumption that recent_cpu updates happen exactly
    when timer_ticks() % TIMER_FREQ == 0. */
 
+struct semaphore sema;
+
 void
+test_mlfqs_recent_1 (void) 
+{
+  ASSERT (thread_mlfqs);
+  sema_init(&sema, 0);
+  thread_create ("T0", 0, Priority_test, NULL);
+  msg("Returning to main thread");
+  msg("sleep until the other thread finishes");
+  sema_down(&sema);
+  msg("got it");
+
+
+}
+
+void
+Priority_test (void) {
+  int64_t start = timer_ticks();
+  ASSERT(thread_current()->priority == PRI_MAX);
+  msg("Criacao de thread: OK");
+  msg("Tentando modificar prioridade");
+  thread_set_priority(0);
+  ASSERT(thread_current()->priority == PRI_MAX);
+  msg("Modificacao ignorada");
+  msg("Esperando ate descer na fila de prioridade");
+  int64_t i = timer_ticks();
+  while (thread_current()->priority == PRI_MAX) {
+    if (i-start > 4) {
+      fail("fail");
+    }
+    i = timer_ticks();
+  }
+  ASSERT(thread_current()->priority != PRI_MAX);
+  msg("Thread desceu na fila de prioridade com sucesso");
+  sema_up(&sema);
+  msg("thread 2 finished");
+}
+
+/*void
 test_mlfqs_recent_1 (void) 
 {
   int64_t start_time;
@@ -141,4 +181,4 @@ test_mlfqs_recent_1 (void)
         } 
       last_elapsed = elapsed;
     }
-}
+}*/

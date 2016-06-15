@@ -111,9 +111,7 @@ timer_sleep (int64_t ticks)
   SP.ticks = ticks;
   SP.start = start;
   list_push_back(&WaitingT, &SP.elem);
-  if (thread_mlfqs) thread_current()->priority = PRI_DEFAULT;
   sema_down(&SP.sem);
-  
 }
 
 static void CheckSleeping (int64_t t) {
@@ -209,7 +207,6 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  //timer_print_stats();
   CheckSleeping(ticks);
   thread_tick ();
 }

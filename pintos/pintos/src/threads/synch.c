@@ -128,9 +128,6 @@ sema_up (struct semaphore *sema)
     
     thread_unblock (list_entry (list_pop_front (&sema->waiters),
                                 struct thread, elem));
-    /*printf("thread priority %d sema unblocked, atual: %d\n",list_entry (list_begin(&sema->waiters),
-                                struct thread, elem)->priority, thread_current()->priority);*/
-  }
   intr_set_level (old_level);
 }
 
