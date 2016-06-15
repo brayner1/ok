@@ -58,7 +58,7 @@ sema_init (struct semaphore *sema, unsigned value)
    interrupts disabled, but if it sleeps then the next scheduled
    thread will probably turn interrupts back on. */
 
-static bool list_func (struct list_elem *a, struct list_elem *b, void *aux) {
+static bool list_sema_func (struct list_elem *a, struct list_elem *b, void *aux) {
 
   return list_entry(a,struct thread,elem)->priority >
          list_entry(b,struct thread,elem)->priority;
@@ -75,10 +75,12 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_insert_ordered (&sema->waiters, &thread_current ()->elem, list_func, NULL);
+      list_insert_ordered (&sema->waiters, &thread_current ()->elem, list_sema_func, NULL);
       thread_block ();
     }
+    
   sema->value--;
+  
   intr_set_level (old_level);
 }
 
@@ -121,10 +123,14 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
+  sema->value++;
+  if (!list_empty (&sema->waiters)) {
+    
     thread_unblock (list_entry (list_pop_front (&sema->waiters),
                                 struct thread, elem));
-  sema->value++;
+    /*printf("thread priority %d sema unblocked, atual: %d\n",list_entry (list_begin(&sema->waiters),
+                                struct thread, elem)->priority, thread_current()->priority);*/
+  }
   intr_set_level (old_level);
 }
 
@@ -272,6 +278,12 @@ cond_init (struct condition *cond)
   list_init (&cond->waiters);
 }
 
+static bool list_cond_func (struct list_elem *a, struct list_elem *b, void *aux) 
+{
+  return thread_current()->priority > 
+  list_entry(list_begin(&(list_entry(b, struct semaphore_elem, elem)->semaphore).waiters), struct thread, elem)->priority;
+}
+
 /* Atomically releases LOCK and waits for COND to be signaled by
    some other piece of code.  After COND is signaled, LOCK is
    reacquired before returning.  LOCK must be held before calling
@@ -303,7 +315,7 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+  list_insert_ordered (&cond->waiters, &waiter.elem, list_cond_func, NULL);
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);

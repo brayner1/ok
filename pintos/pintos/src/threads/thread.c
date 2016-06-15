@@ -146,7 +146,7 @@ thread_tick (void)
 
   /* Atualiza load_avg se tiver passado 1 segundo */ 
   if (timer_ticks() % TIMER_FREQ == 0)
-    load_avg =(((16111 + (f/2))/f)*((int64_t) load_avg)) + (273)*ready_cnt;
+    load_avg =(16111 * (((int64_t) load_avg + (f/2))/f)) + (273)*ready_cnt;
 
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
@@ -234,6 +234,7 @@ thread_block (void)
   thread_current ()->status = THREAD_BLOCKED;
   
   schedule ();
+
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -258,11 +259,11 @@ thread_unblock (struct thread *t)
   list_insert_ordered(&ready_list, &t->elem,thread_max_func, NULL);
   ready_cnt++;
   t->status = THREAD_READY;
-  printf("desbloqueando thread %d, ready = %d \n", t->tid, ready_cnt);
+
   intr_set_level (old_level);
   if(ok)
   {
-    if(t->priority > thread_get_priority())
+    if(t->priority > cur->priority)
     {
       thread_yield();
     }
@@ -399,10 +400,10 @@ int
 thread_get_load_avg (void) 
 {
   /* Not yet implemented. */
-  int aux =  ((load_avg) + (f/2))/f;
-  printf("load avg: %d, aux: %d\n", load_avg, aux );
+  int aux =  (((load_avg*100))/f);
+  printf("load avg: %d, aux: %d, em %ds\n", load_avg, aux, timer_ticks()/TIMER_FREQ );
   //return load_avg;
-  return aux*100;
+  return aux;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
