@@ -50,10 +50,16 @@ struct kernel_thread_frame
 static long long idle_ticks;    /* # of timer ticks spent idle. */
 static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
 static long long user_ticks;    /* # of timer ticks in user programs. */
+int ready_threads = 0;
 
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+
+/* variável load_avg e f (fator para fixed-point, sendo 2¹⁴) */
+static int load_avg = 0;
+static int f = 16384;
+
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -120,13 +126,28 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
+/* Funções que atualizam o recent_cpu e a priority da thread *t
+passada como argumento. Essas funções são usadas pela função thread_foreach,
+que chamam essa função para cada thread presente no SO. */
+
+static void update_recent (struct thread *t, void *aux) {
+  int fact = *((int*) aux);
+  t->recent_cpu = (( ((int64_t) fact)*t->recent_cpu)/f) + t->nice*f;
+}
+
+static void update_priorities (struct thread *t, void *aux) {
+  int priority = ((PRI_MAX*f) - (t->recent_cpu/4) - ((t->nice*2)*f))/f;
+  priority = (priority>PRI_MAX)? PRI_MAX : (priority<PRI_MIN)? PRI_MIN : priority;
+  t->priority = priority;
+}
+
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
 void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
-
+  int64_t time = timer_ticks();
   /* Update statistics. */
   if (t == idle_thread)
     idle_ticks++;
@@ -137,6 +158,20 @@ thread_tick (void)
   else
     kernel_ticks++;
 
+  if (thread_mlfqs) {
+    if (t != idle_thread) {
+        t->recent_cpu+=f;
+    }
+    if (time % TIMER_FREQ == 0) {
+      load_avg = (59*load_avg+(ready_threads*f))/60;
+      int aux = ((int64_t) 2*load_avg*f)/(2*load_avg+f);
+      thread_foreach(update_recent, &aux);
+    }
+    if (time % 4 == 0) {
+      thread_foreach(update_priorities, NULL);
+    }
+    
+  }
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE) 
     intr_yield_on_return ();
@@ -182,6 +217,8 @@ thread_create (const char *name, int priority,
   if (t == NULL)
     return TID_ERROR;
   if (thread_mlfqs) priority = PRI_MAX;
+  t->nice = 0;
+  t->recent_cpu = 0;
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
@@ -221,7 +258,10 @@ thread_block (void)
 
   if (thread_current() != idle_thread && thread_mlfqs) {
    thread_current()->priority = PRI_MAX;
+   //printf("%s blocking, ready: %d\n", thread_current()->name, ready_threads);
+   ready_threads--;
   }
+  
   thread_current ()->status = THREAD_BLOCKED;
   schedule ();
 
@@ -246,15 +286,18 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_insert_ordered(&ready_list, &t->elem,thread_max_func, NULL);
   t->status = THREAD_READY;
-
-  intr_set_level (old_level);
+  //printf("%s unblocking %s, ready: %d\n", cur->name, t->name, ready_threads);
+  if (t != idle_thread) ready_threads++;
   if(cur != idle_thread)
   {
+    
     if(t->priority > cur->priority)
     {
       thread_yield();
     }
   }
+  intr_set_level (old_level);
+
 }
 
 /* Returns the name of the running thread. */
@@ -307,6 +350,7 @@ thread_exit (void)
   intr_disable ();
   list_remove (&thread_current()->allelem);
   thread_current ()->status = THREAD_DYING;
+  ready_threads--;
   schedule ();
   NOT_REACHED ();
 }
@@ -322,8 +366,6 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (thread_mlfqs)
-    cur->priority = PRI_DEFAULT;
   if (cur != idle_thread) {
     list_insert_ordered(&ready_list, &cur->elem, thread_max_func, NULL);
   }
@@ -345,7 +387,8 @@ thread_foreach (thread_action_func *func, void *aux)
        e = list_next (e))
     {
       struct thread *t = list_entry (e, struct thread, allelem);
-      func (t, aux);
+      if (t != idle_thread)
+        func (t, aux);
     }
 }
 
@@ -387,7 +430,7 @@ int
 thread_get_load_avg (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return (((load_avg*100)+(f/2))/f);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -395,7 +438,7 @@ int
 thread_get_recent_cpu (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return (((thread_current()->recent_cpu*100) + (f/2))/f);
 }
 
 
